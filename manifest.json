@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Browser-Based Image Highlight Extension",
+  "version": "1.0",
+  "description": "Runs a small model in the browser",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "onnxruntime-web/ort.js",
+        "content.js"
+      ]
+    }
+  ],
+  "sandbox": {
+    "pages": ["model.html"]
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "onnxruntime-web/ort.js",
+        "onnxruntime-web/ort-wasm-simd-threaded.wasm",
+        "onnxruntime-web/ort-wasm-simd-threaded.mjs",
+        "onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm",
+        "onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs",
+        "onnxruntime-web/ort.wasm.mjs",
+        "onnxruntime-web/ort.wasm.js",
+        "model.onnx"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
+  "action": {
+    "default_popup": "model.html"
+  }
+}
