@@ -46,39 +46,53 @@ async function loadModelAndRunInference() {
   }
 }
 
-// Function to run inference using the ONNX model
-async function runInference(session, imageData) {
+async function runInference(session, inputTensor) {
   try {
-    // Convert image data to a format suitable for ONNX model input
-    const inputTensor = preprocessImageData(imageData);
-    const feeds = { input: inputTensor }; // Adjust input name based on your model
-
-    // Run inference
+    const feeds = { input: inputTensor };
     const output = await session.run(feeds);
-    console.log("Inference executed successfully!");
 
-    // Example: Log the output data
-    const probability = output['output'].data[0]; // Assuming 'output' is the correct output name
-    console.log("Model output probability of being a deepfake:", probability);
+    const outputName = session.outputNames[0];
+    const logits = output[outputName].data;
 
-    return probability > 0.5;  // Example threshold to decide deepfake
+    const logit = logits[0];
+    const realProbability = 1 / (1 + Math.exp(-logit)); // Sigmoid function
+    const fakeProbability = 1 - realProbability;
+
+    console.log("Model output logit:", logit);
+    console.log("Probability of being real:", realProbability);
+    console.log("Probability of being fake:", fakeProbability);
+
+    // Determine if the image is a deepfake based on the fake probability
+    return fakeProbability > 0.5;
   } catch (error) {
     console.error("Error during inference:", error);
     return null;
   }
 }
 
-// Function to preprocess image data for ONNX model
 function preprocessImageData(imageData) {
   const width = imageData.width;
   const height = imageData.height;
   const data = imageData.data;
-  
-  // Resize and normalize image data
-  const resizedData = resizeImageData(data, width, height, 224, 224); // Resize to 224x224
-  const floatData = normalizeImageData(resizedData);  // Normalize with mean and std
 
-  return new ort.Tensor('float32', floatData, [1, 3, 224, 224]); // Adjust shape based on model requirements
+  const floatData = new Float32Array(1 * 3 * height * width);
+
+  // Loop over all pixels and arrange the data
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const r = data[idx * 4 + 0] / 255.0;
+      const g = data[idx * 4 + 1] / 255.0;
+      const b = data[idx * 4 + 2] / 255.0;
+
+      // Assign to floatData in channel-first order
+      floatData[0 * height * width + y * width + x] = r; // Red channel
+      floatData[1 * height * width + y * width + x] = g; // Green channel
+      floatData[2 * height * width + y * width + x] = b; // Blue channel
+    }
+  }
+
+  return new ort.Tensor('float32', floatData, [1, 3, height, width]);
 }
 
 // Function to resize image data
@@ -95,20 +109,26 @@ function resizeImageData(data, originalWidth, originalHeight, targetWidth, targe
   return ctx.getImageData(0, 0, targetWidth, targetHeight).data;
 }
 
-// Function to normalize image data
+//Removed Mean and Standard Deviation Normalization: Since the model handles normalization internally, we only need to scale the pixel values to the [0, 1] range by dividing by 255.0.
+//Converted to Float32Array: Ensures the data is in the correct format for the ONNX model.
+//Excluded Alpha Channel: If your images have an alpha channel (RGBA), we only need the RGB channels.
+
 function normalizeImageData(data) {
-  const mean = [0.485, 0.456, 0.406];
-  const std = [0.229, 0.224, 0.225];
-  const normalizedData = new Float32Array(data.length / 4 * 3);  // 3 channels, discard alpha
+  const normalizedData = new Float32Array(data.length / 4 * 3);
 
   for (let i = 0; i < data.length / 4; i++) {
-    normalizedData[i * 3 + 0] = (data[i * 4 + 0] / 255.0 - mean[0]) / std[0];  // Red
-    normalizedData[i * 3 + 1] = (data[i * 4 + 1] / 255.0 - mean[1]) / std[1];  // Green
-    normalizedData[i * 3 + 2] = (data[i * 4 + 2] / 255.0 - mean[2]) / std[2];  // Blue
+    const r = data[i * 4 + 0] / 255.0; // Red channel
+    const g = data[i * 4 + 1] / 255.0; // Green channel
+    const b = data[i * 4 + 2] / 255.0; // Blue channel
+
+    normalizedData[i * 3 + 0] = r;
+    normalizedData[i * 3 + 1] = g;
+    normalizedData[i * 3 + 2] = b;
   }
 
   return normalizedData;
 }
+
 
 // Function to get image data from the DOM
 function getImageData(imgElement) {
@@ -123,11 +143,12 @@ function getImageData(imgElement) {
   // Draw the image on the canvas
   ctx.drawImage(imgElement, 0, 0, 224, 224);  // Resize and draw
 
-  // Try to get image data safely
   try {
-    return ctx.getImageData(0, 0, 224, 224);
+    const imageData = ctx.getImageData(0, 0, 224, 224);
+    return imageData;
   } catch (e) {
     console.error('Error accessing canvas data:', e);
     return null;
   }
+
 }

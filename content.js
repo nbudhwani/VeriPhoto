@@ -102,23 +102,22 @@ function getImageData(imgElement) {
 async function runInference(session, imageData) {
   try {
     const inputTensor = preprocessImageData(imageData);
-    console.log("Input Tensor Shape:", inputTensor.dims);
-    console.log("Input Tensor Data (first 50 values):", inputTensor.data.slice(0, 50));
 
     const feeds = { input: inputTensor };
     const output = await session.run(feeds);
-    console.log("Inference executed successfully!");
 
     const outputName = session.outputNames[0];
-    const logit = output[outputName].data[0];
-    console.log("Model output logit of being a deepfake:", logit);
+    const logits = output[outputName].data;
 
-    const probability = sigmoid(logit);
-    console.log("Model output probability of being a deepfake (logit):", logit);
-    const probabilityPercentage = (probability * 100).toFixed(2);
-    console.log("Model output probability of being a deepfake (%):", probabilityPercentage + '%');
+    const logit = logits[0];
+    const realProbability = sigmoid(logit);
+    const fakeProbability = 1 - realProbability;
 
-    return probability > 0.5;
+    console.log("Model output logit:", logit);
+    console.log("Probability of being real:", realProbability);
+    console.log("Probability of being fake:", fakeProbability);
+
+    return fakeProbability > 0.5;
   } catch (error) {
     console.error("Error during inference:", error);
     return null;
@@ -131,41 +130,22 @@ function preprocessImageData(imageData) {
   const height = imageData.height;
   const data = imageData.data;
 
-  const resizedData = resizeImageData(data, width, height, 224, 224);
-  const floatData = normalizeImageData(resizedData);
+  const floatData = new Float32Array(1 * 3 * height * width);
 
-  return new ort.Tensor('float32', floatData, [1, 3, 224, 224]);
-}
+  // Loop over all pixels and arrange the data
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const r = data[idx * 4 + 0] / 255.0;
+      const g = data[idx * 4 + 1] / 255.0;
+      const b = data[idx * 4 + 2] / 255.0;
 
-// Function to resize image data
-function resizeImageData(data, originalWidth, originalHeight, targetWidth, targetHeight) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-
-  const imgData = new ImageData(new Uint8ClampedArray(data), originalWidth, originalHeight);
-  ctx.putImageData(imgData, 0, 0);
-  ctx.drawImage(canvas, 0, 0, originalWidth, originalHeight, 0, 0, targetWidth, targetHeight);
-
-  return ctx.getImageData(0, 0, targetWidth, targetHeight).data;
-}
-
-// Function to normalize image data
-function normalizeImageData(data) {
-  const mean = [0.485, 0.456, 0.406];
-  const std = [0.229, 0.224, 0.225];
-  const normalizedData = new Float32Array(data.length / 4 * 3);
-
-  for (let i = 0; i < data.length / 4; i++) {
-    const r = data[i * 4 + 0] / 255.0;
-    const g = data[i * 4 + 1] / 255.0;
-    const b = data[i * 4 + 2] / 255.0;
-
-    normalizedData[i * 3 + 0] = (r - mean[0]) / std[0];
-    normalizedData[i * 3 + 1] = (g - mean[1]) / std[1];
-    normalizedData[i * 3 + 2] = (b - mean[2]) / std[2];
+      // Assign to floatData in channel-first order
+      floatData[0 * height * width + y * width + x] = r; // Red channel
+      floatData[1 * height * width + y * width + x] = g; // Green channel
+      floatData[2 * height * width + y * width + x] = b; // Blue channel
+    }
   }
 
-  return normalizedData;
+  return new ort.Tensor('float32', floatData, [1, 3, height, width]);
 }
